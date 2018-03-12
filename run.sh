@@ -37,7 +37,7 @@ GIT_COMMIT=`git rev-parse HEAD`
 GIT_STATUS=`git status | grep -c 'Changes not staged for commit'`
 
 # where the summary (pass or fail) for all tests will be saved
-SUMMARY_FILE="../Data/summary-$GIT_COMMIT-$GIT_STATUS"
+SUMMARY_FILE="./Data/summary-$GIT_COMMIT-$GIT_STATUS"
 
 # remove the old summary file, should it exist from a previous run of this script with the same commit level
 rm -f $SUMMARY_FILE
