@@ -1,0 +1,25 @@
+topology : CONTEXT = 
+BEGIN
+
+NODE : TYPE = {none, alice, bob, broadcast};
+CLIENT : TYPE = {u : topology!NODE | u /= topology!none AND u /= topology!broadcast};
+LINK : TYPE = {NA, AB};
+LOGICALNETWORKADDR : TYPE = {null, localdomain};
+CATEGORY : TYPE = {c0};
+
+IMPORTING network;
+
+execute : MODULE = 
+  establishconnections
+  []host!stateful[alice, AB, FALSE, localdomain, 2]
+  []host!stateful[bob, AB, FALSE, localdomain, 1];
+
+%% each host can send and receive the other's message
+group1_test1_0_false : THEOREM execute |- G(received.2.author /= alice);
+group1_test2_0_false : THEOREM execute |- G(received.1.author /= bob);
+%% alice can send two messages
+group2_test1_0_false : THEOREM execute |- G(received.2.author /= alice XOR (received.2.author = alice AND aether[AB].author /= alice));
+%% but bob can only send one message
+group2_test2_0_true : THEOREM execute |- G(received.1.author /= bob XOR (received.1.author = bob AND aether[AB].author /= bob));
+
+END

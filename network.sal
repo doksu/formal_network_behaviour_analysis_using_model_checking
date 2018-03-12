@@ -1,0 +1,33 @@
+network : CONTEXT = 
+BEGIN
+
+HOST : TYPE = {u : topology!NODE | u /= topology!none AND u /= topology!broadcast};
+LOGICALNETWORK : TYPE = {u : topology!LOGICALNETWORKADDR | u /= topology!null};
+ACTION : TYPE = {ACCEPT, DISCARD};
+ACL : TYPE = [# SRC_host : topology!NODE, SRC_net : topology!LOGICALNETWORKADDR, DST_host : topology!NODE, DST_net : topology!LOGICALNETWORKADDR, action : ACTION #];
+CLEARANCE : TYPE = ARRAY topology!CATEGORY OF BOOLEAN;
+DATAGRAM : TYPE = [# sourcenetwork : topology!LOGICALNETWORKADDR, sourcehost : topology!NODE, destinationnetwork : topology!LOGICALNETWORKADDR, destinationhost : topology!NODE, label : CLEARANCE #];
+FRAME : TYPE = [# source : topology!NODE, destination : topology!NODE, payload : DATAGRAM #];
+METAMESSAGE : TYPE = [# author : topology!NODE, forwarder : topology!NODE, payload : FRAME #];
+REALLINK : TYPE = {a : topology!LINK | a /= topology!NA};
+NETWORK : TYPE = ARRAY REALLINK OF METAMESSAGE;
+NETWORKCLEARANCE : TYPE = ARRAY REALLINK OF CLEARANCE;
+EMPTYLABEL : CLEARANCE = [[c : topology!CATEGORY] FALSE];
+LABELPOLICY : TYPE = ARRAY REALLINK OF BOOLEAN;
+
+ARPTABLE : TYPE = ARRAY topology!NODE OF [# phyaddr : topology!NODE, interface : topology!LINK #];
+
+EMPTYMETAMESSAGE : METAMESSAGE = (# author := topology!none, forwarder := topology!none, payload := (# source := topology!none, destination := topology!none, payload := (# sourcenetwork := topology!null, sourcehost := topology!none, destinationnetwork := topology!null, destinationhost := topology!none, label := EMPTYLABEL #) #) #);
+
+
+establishconnections : MODULE =
+BEGIN
+
+GLOBAL aether : NETWORK
+
+INITIALIZATION
+(FORALL (a : REALLINK) : aether[a] = EMPTYMETAMESSAGE)
+
+END;
+
+END

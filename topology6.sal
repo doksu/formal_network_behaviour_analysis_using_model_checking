@@ -1,0 +1,82 @@
+topology : CONTEXT = 
+BEGIN
+
+NODE : TYPE = {none, A1, A2, A3, AS, SGA, SGB, BS, B1, B2, B3, broadcast};
+CLIENT : TYPE = {u : topology!NODE | u /= topology!none AND u /= topology!broadcast};
+LINK : TYPE = {NA, A1C, A2C, A3C, ASR, PPP, BSR, B1C, B2C, B3C};
+LOGICALNETWORKADDR : TYPE = {null, anet, internet, bnet};
+FIREWALLSIZE : TYPE = [1..8];
+CATEGORY : TYPE = {c0};
+
+IMPORTING network;
+
+execute : MODULE = 
+ establishconnections
+
+ []host!stateless[A1, A1C, FALSE, anet, 1]
+ []host!stateless[A2, A2C, FALSE, anet, 1]
+ []host!stateless[A3, A3C, FALSE, anet, 1]
+
+ []host!stateless[B1, B1C, FALSE, bnet, 1]
+ []host!stateless[B2, B2C, FALSE, bnet, 1]
+ []host!stateless[B3, B3C, FALSE, bnet, 1]
+
+ []bridge!IEEE8021D04 [AS, [[i : REALLINK] i = A1C OR i = A2C OR i = A3C OR i = ASR], [[s : HOST] NA]]
+ []bridge!IEEE8021D04 [BS, [[i : REALLINK] i = B1C OR i = B2C OR i = B3C OR i = BSR], [[s : HOST] NA]]
+
+ []router!router[
+	SGA,
+	FALSE,
+	[[i : REALLINK] i = ASR OR i = PPP],
+	[[u : LOGICALNETWORK] IF u = anet THEN ASR ELSIF u = internet THEN PPP ELSE NA ENDIF],
+	[[x : LOGICALNETWORK] [[y : LOGICALNETWORK] IF x = bnet AND y = internet THEN SGB ELSE none ENDIF]],
+	(# lognet := null, loghost := none #),
+	[[r : FIREWALLSIZE] IF r = 1 THEN (# SRC_host := A1, SRC_net := anet, DST_host := B1, DST_net := bnet, action := ACCEPT #) ELSIF r = 2 THEN (# SRC_host := A2, SRC_net := anet, DST_host := B2, DST_net := bnet, action := ACCEPT #) ELSIF r = 3 THEN (# SRC_host := A3, SRC_net := anet, DST_host := B3, DST_net := bnet, action := ACCEPT #) ELSIF r = 4 THEN (# SRC_host := A2, SRC_net := anet, DST_host := B3, DST_net := bnet, action := DISCARD #) ELSIF r = 5 THEN (# SRC_host := none, SRC_net := anet, DST_host := B2, DST_net := bnet, action := DISCARD #) ELSIF r = 6 THEN (# SRC_host := none, SRC_net := anet, DST_host := none, DST_net := bnet, action := ACCEPT #) ELSIF r = 7 THEN (# SRC_host := A2, SRC_net := anet, DST_host := B1, DST_net := bnet, action := ACCEPT #) ELSIF r = 8 THEN (# SRC_host := A1, SRC_net := anet, DST_host := none, DST_net := bnet, action := DISCARD #) ELSE (# SRC_host := none, SRC_net := null, DST_host := none, DST_net := null, action := DISCARD #) ENDIF],
+	[[y : REALLINK] FALSE],
+	[[z : REALLINK] [[c : CATEGORY] FALSE]]]
+
+ []router!router[
+        SGB,
+        FALSE,
+        [[i : REALLINK] i = BSR OR i = PPP],
+        [[u : LOGICALNETWORK] IF u = bnet THEN BSR ELSIF u = internet THEN PPP ELSE NA ENDIF],
+	[[x : LOGICALNETWORK] [[y : LOGICALNETWORK] IF x = anet AND y = internet THEN SGA ELSE none ENDIF]],
+        (# lognet := null, loghost := none #),
+        [[r : FIREWALLSIZE] IF r = 1 THEN (# SRC_host := A1, SRC_net := anet, DST_host := B1, DST_net := bnet, action := ACCEPT #) ELSIF r = 2 THEN (# SRC_host := A2, SRC_net := anet, DST_host := B2, DST_net := bnet, action := ACCEPT #) ELSIF r = 3 THEN (# SRC_host := A3, SRC_net := anet, DST_host := B3, DST_net := bnet, action := ACCEPT #) ELSIF r = 4 THEN (# SRC_host := A2, SRC_net := anet, DST_host := B3, DST_net := bnet, action := ACCEPT #) ELSIF r = 5 THEN (# SRC_host := A3, SRC_net := anet, DST_host := B2, DST_net := bnet, action := ACCEPT #) ELSIF r = 6 THEN (# SRC_host := A1, SRC_net := anet, DST_host := B3, DST_net := bnet, action := DISCARD #) ELSIF r = 7 THEN (# SRC_host := none, SRC_net := anet, DST_host := B1, DST_net := bnet, action := ACCEPT #) ELSIF r = 8 THEN (# SRC_host := A2, SRC_net := anet, DST_host := none, DST_net := bnet, action := DISCARD #) ELSE (# SRC_host := none, SRC_net := null, DST_host := none, DST_net := null, action := DISCARD #) ENDIF],
+	[[y : REALLINK] FALSE],
+	[[z : REALLINK] [[c : CATEGORY] FALSE]]];
+
+%% A1
+
+% Common accept rule 1 on each firewall
+group1_test1_12_false : THEOREM execute |- G(aether[B1C].author /= A1);
+
+% SGA rule 5 discard
+group1_test2_12_true : THEOREM execute |- G(aether[B2C].author /= A1);
+
+% Inter-policy partial spuriousness between rule 6 on each firewall
+group1_test3_12_true : THEOREM execute |- G(aether[B3C].author /= A1);
+
+%% A2
+
+% Rule 6 and Rule 7 accept rules on SGA and SGB, respectively
+group2_test1_12_false : THEOREM execute |- G(aether[B1C].author /= A2);
+
+% Common accept rule 2 on each firewall
+group2_test2_12_false : THEOREM execute |- G(aether[B2C].author /= A2);
+
+% Inter-policy complete shadowing between rule 4 on each firewall
+group2_test3_13_true : THEOREM execute |- G(aether[B3C].author /= A2);
+
+%% A3
+
+% Rule 6 and Rule 7 accept rules on SGA and SGB, respectively
+group3_test1_12_false : THEOREM execute |- G(aether[B1C].author /= A3);
+
+% Inter-policy partial shadowing between rule 5 on each firewall
+group3_test2_12_true : THEOREM execute |- G(aether[B2C].author /= A3);
+
+% Common accept rule 3 on each firewall
+group3_test3_12_false : THEOREM execute |- G(aether[B3C].author /= A3);
+
+END

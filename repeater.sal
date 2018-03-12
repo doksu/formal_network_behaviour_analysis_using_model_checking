@@ -1,0 +1,37 @@
+repeater : CONTEXT = 
+BEGIN
+
+IMPORTING network;
+
+messagewaiting?(me : HOST, msg : METAMESSAGE) : BOOLEAN =
+        msg.author /= topology!none AND
+        msg.author /= me AND
+        msg.forwarder /= me;
+
+repeater [me : HOST, cable : ARRAY REALLINK OF BOOLEAN] : MODULE = 
+BEGIN
+
+LOCAL interface : topology!LINK
+GLOBAL aether : NETWORK
+
+INITIALIZATION
+interface = topology!NA
+
+TRANSITION
+[
+
+        propagate:
+	TRUE
+        -->
+
+		interface' IN {a : REALLINK | 
+                cable[a] AND
+		messagewaiting?(me, aether[a])};
+
+                (FORALL (j : {v : REALLINK | cable[v]}) : aether'[j] = (IF j /= interface' THEN (aether[interface'] WITH .forwarder := me) ELSE EMPTYMETAMESSAGE ENDIF));
+
+]
+
+END;
+
+END

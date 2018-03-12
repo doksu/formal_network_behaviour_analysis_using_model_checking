@@ -1,0 +1,154 @@
+topology : CONTEXT = 
+BEGIN
+
+NODE : TYPE = {none, Alice, Bob, Carlos, RouterA, RouterB, RouterC, broadcast};
+CLIENT : TYPE = {u : topology!NODE | u /= topology!none AND u /= topology!broadcast};
+LINK : TYPE = {NA, A, B, C, AC, CB, BA};
+LOGICALNETWORKADDR : TYPE = {null, left, top, right, atoc, ctob, btoa};
+FIREWALLSIZE : TYPE = [1..1];
+CATEGORY : TYPE = {c0};
+
+IMPORTING network;
+
+execute : MODULE = 
+ establishconnections
+
+ []host!stateless[Alice, A, TRUE, left, 1]
+ []host!stateless[Carlos, C, TRUE, top, 1]
+ []host!stateless[Bob, B, TRUE, right, 1]
+
+ []router!router[
+	RouterA,
+	FALSE,
+	[[i : REALLINK] i = A OR i = AC OR i = BA],
+	[[u : LOGICALNETWORK] IF u = left THEN A ELSIF u = atoc THEN AC ELSIF u = btoa THEN BA ELSE NA ENDIF],
+	[[x : LOGICALNETWORK] [[y : LOGICALNETWORK] IF x = right AND y = atoc THEN RouterC ELSIF x = right AND y = btoa THEN RouterB ELSE none ENDIF]],
+	(# lognet := atoc, loghost := RouterC #),
+	[[r : FIREWALLSIZE] (# SRC_host := none, SRC_net := null, DST_host := none, DST_net := null, action := ACCEPT #)],
+	[[y : REALLINK] FALSE],
+	[[z : REALLINK] [[c : CATEGORY] FALSE]]]
+
+ []router!router[
+        RouterC,
+        FALSE,
+        [[i : REALLINK] i = C OR i = AC OR i = CB],
+        [[u : LOGICALNETWORK] IF u = top THEN C ELSIF u = atoc THEN AC ELSIF u = ctob THEN CB ELSE NA ENDIF],
+	[[x : LOGICALNETWORK] [[y : LOGICALNETWORK] IF x = left AND y = atoc THEN RouterA ELSIF x = left AND y = ctob THEN RouterB ELSIF x = right AND y = atoc THEN RouterA ELSIF x = right AND y = ctob THEN RouterB ELSE none ENDIF]],
+        (# lognet := null, loghost := none #),
+	[[r : FIREWALLSIZE] (# SRC_host := none, SRC_net := null, DST_host := none, DST_net := null, action := ACCEPT #)],
+	[[y : REALLINK] FALSE],
+	[[z : REALLINK] [[c : CATEGORY] FALSE]]]
+
+ []router!router[
+        RouterB,
+        FALSE,
+        [[i : REALLINK] i = B OR i = CB OR i = BA],
+        [[u : LOGICALNETWORK] IF u = right THEN B ELSIF u = ctob THEN CB ELSIF u = btoa THEN BA ELSE NA ENDIF],
+	[[x : LOGICALNETWORK] [[y : LOGICALNETWORK] IF x = left AND y = ctob THEN RouterC ELSIF x = left AND y = btoa THEN RouterA ELSE none ENDIF]],
+        (# lognet := btoa, loghost := RouterA #),
+	[[r : FIREWALLSIZE] (# SRC_host := none, SRC_net := null, DST_host := none, DST_net := null, action := ACCEPT #)],
+	[[y : REALLINK] FALSE],
+	[[z : REALLINK] [[c : CATEGORY] FALSE]]];
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Expected Connectivity and Routing Checks
+
+% Alice can send to Bob
+group1_test1_8_false : THEOREM execute |- G(aether[B].author /= Alice);
+% Alice can send to Bob via btoa next-hop route
+group1_test2_5_false : THEOREM execute |- G(NOT(aether[BA].forwarder = RouterA AND aether[BA].author = Alice AND aether[BA].payload.payload.destinationnetwork = right));
+% Alice can send to Bob via atoc next-hop then ctob next-hop route
+group1_test3_9_false : THEOREM execute |- G(NOT(aether[CB].forwarder = RouterC AND aether[CB].author = Alice AND aether[CB].payload.payload.destinationnetwork = right));
+% Alice can send to Carlos via default route
+group1_test4_8_false : THEOREM execute |- G(aether[C].author /= Alice);
+
+% Bob can send to Alice
+group2_test1_8_false : THEOREM execute |- G(aether[A].author /= Bob);
+% Bob can send to Alice via ctob next-hop then atoc next-hop route
+group2_test2_9_false : THEOREM execute |- G(NOT(aether[AC].forwarder = RouterC AND aether[AC].author = Bob AND aether[AC].payload.payload.destinationnetwork = left));
+% Bob can send to Alice via btoa next-hop route
+group2_test3_5_false : THEOREM execute |- G(NOT(aether[BA].forwarder = RouterB AND aether[BA].author = Bob AND aether[BA].payload.payload.destinationnetwork = left));
+% Bob can send to Carlos via two default routes
+group2_test4_12_false : THEOREM execute |- G(aether[C].author /= Bob);
+
+% Carlos can only send to Alice via atoc next-hop route (due to RouterB source network check)
+group3_test1_8_false : THEOREM execute |- G(aether[A].author /= Carlos);
+% Carlos can only send to Bob via atoc next-hop then btoa next-hop route (due to RouterB source network check)
+group3_test2_12_false : THEOREM execute |- G(aether[B].author /= Carlos);
+
+% RouterA can local route to atoc network
+group4_test1_5_false : THEOREM execute |- G(NOT(aether[AC].author = Alice AND aether[AC].payload.payload.destinationnetwork = atoc));
+% RouterA can default route then RouterC can local route to ctob network
+group4_test2_9_false : THEOREM execute |- G(NOT(aether[CB].author = Alice AND aether[CB].payload.payload.destinationnetwork = ctob));
+% RouterA can local route to btoa network
+group4_test3_5_false : THEOREM execute |- G(NOT(aether[BA].author = Alice AND aether[BA].payload.payload.destinationnetwork = btoa));
+% RouterB can local route to btoa network
+group4_test4_5_false : THEOREM execute |- G(NOT(aether[BA].author = Bob AND aether[BA].payload.payload.destinationnetwork = btoa));
+% RouterB can local route to ctob network
+group4_test5_5_false : THEOREM execute |- G(NOT(aether[CB].author = Bob AND aether[CB].payload.payload.destinationnetwork = ctob));
+% RouterB can default route then RouterA can local route to atoc network
+group4_test6_9_false : THEOREM execute |- G(NOT(aether[AC].author = Bob AND aether[AC].payload.payload.destinationnetwork = atoc));
+% RouterC can local route to atoc network
+group4_test7_5_false : THEOREM execute |- G(NOT(aether[AC].author = Carlos AND aether[AC].payload.payload.destinationnetwork = atoc));
+% RouterC can local route to ctob network
+group4_test8_5_false : THEOREM execute |- G(NOT(aether[CB].author = Carlos AND aether[CB].payload.payload.destinationnetwork = ctob));
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Source Network Check Proofs, incl. multi-layer header field validation
+
+% All traffic that is successfully routed to Alice will have valid layer 2 and 3 headers
+group5_test1_12_true : THEOREM execute |- G(aether[A].forwarder /= none =>
+	aether[A].forwarder = RouterA AND
+	((aether[A].author = Bob AND aether[A].payload.payload.sourcenetwork = right) OR (aether[A].author = Carlos AND aether[A].payload.payload.sourcenetwork = top)) AND
+	aether[A].payload.source = RouterA AND
+	aether[A].payload.payload.destinationnetwork = left
+);
+
+% All traffic that is successfully routed to Bob will have valid layer 2 and 3 headers
+group5_test2_12_true : THEOREM execute |- G(aether[B].forwarder /= none =>
+        aether[B].forwarder = RouterB AND
+        ((aether[B].author = Alice AND aether[B].payload.payload.sourcenetwork = left) OR (aether[B].author = Carlos AND aether[B].payload.payload.sourcenetwork = top)) AND
+        aether[B].payload.source = RouterB AND
+        aether[B].payload.payload.destinationnetwork = right
+);
+
+% All traffic that is successfully routed to Carlos will have valid layer 2 and 3 headers
+group5_test3_12_true : THEOREM execute |- G(aether[C].forwarder /= none =>
+        aether[C].forwarder = RouterC AND
+        ((aether[C].author = Bob AND aether[C].payload.payload.sourcenetwork = right) OR (aether[C].author = Alice AND aether[C].payload.payload.sourcenetwork = left)) AND
+        aether[C].payload.source = RouterC AND
+        aether[C].payload.payload.destinationnetwork = top
+);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Impossible routes
+
+% RouterA should never route traffic for the top network via the btoa network
+group6_test1_12_true : THEOREM execute |- G(aether[BA].payload.payload.destinationnetwork = top => aether[BA].author = Bob);
+% RouterB should never route traffic for the top network via the ctob network
+group6_test2_12_true : THEOREM execute |- G(aether[CB].payload.payload.destinationnetwork /= top);
+% Carlos cannot have his traffic successfully routed to the btoa network as destination because RouterC has no route to it
+group6_test3_12_true : THEOREM execute |- G(NOT(aether[BA].author = Carlos AND aether[BA].payload.payload.destinationnetwork = btoa));
+% Carlos cannot have his traffic successfully routed to Alice via the btoa network because although RouterC has the route, RouterB's source network check will discard it
+group6_test4_12_true : THEOREM execute |- G(NOT(aether[BA].author = Carlos AND aether[BA].payload.payload.destinationnetwork = left));
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Other Erroneous traffic
+
+% Layer 2 broadcast traffic is never routed
+group7_test1_12_true : THEOREM execute |- G(FORALL (a : REALLINK) : aether[a].payload.destination = broadcast => aether[a].forwarder = topology!none);
+% Layer 3 broadcast traffic is never routed
+group7_test2_12_true : THEOREM execute |- G(FORALL (a : REALLINK) : aether[a].payload.payload.destinationhost = broadcast => aether[a].forwarder = topology!none);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% ARP behavioural checks
+
+% Routers never add their own address to ARP table
+group8_test1_12_true : THEOREM execute |- G(FORALL (a : HOST) : resolv.1.1[a].phyaddr /= RouterA AND resolv.1.2[a].phyaddr /= RouterC AND resolv.2[a].phyaddr /= RouterB);
+
+END

@@ -1,0 +1,186 @@
+bridge : CONTEXT = 
+BEGIN
+
+IMPORTING network;
+
+LEARNTYPE : TYPE = {empty, static, dynamic};
+FILTERINGENTRY : TYPE = [# acquisition: LEARNTYPE, interface : topology!LINK #];
+LOOKUPTABLE : TYPE = ARRAY HOST OF FILTERINGENTRY;
+
+messagewaiting?(me : HOST, msg : METAMESSAGE) : BOOLEAN =
+        msg.author /= topology!none AND
+        msg.author /= me AND
+        msg.forwarder /= me;
+
+validmessage?(me : HOST, msg : METAMESSAGE) : BOOLEAN =
+	msg.payload.source /= me AND
+        msg.payload.destination /= me AND
+        msg.payload.source /= msg.payload.destination;
+
+IEEE8021D04 [me : HOST, cable : ARRAY REALLINK OF BOOLEAN, staticentries : ARRAY HOST OF REALLINK] : MODULE = 
+BEGIN
+
+LOCAL filteringdatabase : LOOKUPTABLE
+LOCAL interface : topology!LINK
+GLOBAL aether : NETWORK
+
+INITIALIZATION
+(FORALL (j : HOST) :
+	filteringdatabase[j] =
+		IF staticentries[j] = topology!NA THEN
+			(# acquisition := empty, interface := topology!NA #)
+		ELSE
+			(# acquisition := static, interface := staticentries[j] #)
+		ENDIF);
+interface = topology!NA
+
+TRANSITION
+[
+
+	unicast:
+	TRUE
+	-->
+		interface' IN {a : REALLINK | 
+		cable[a] AND
+		messagewaiting?(me, aether[a]) AND
+		validmessage?(me, aether[a]) AND
+		filteringdatabase[aether[a].payload.destination].interface /= topology!NA AND
+		filteringdatabase[aether[a].payload.destination].interface /= a};
+
+		filteringdatabase' = IF filteringdatabase[aether[interface'].payload.source].acquisition = static THEN
+			filteringdatabase
+		ELSE
+			(filteringdatabase WITH [aether[interface'].payload.source].acquisition := dynamic) WITH [aether[interface'].payload.source].interface := interface'
+		ENDIF;
+		
+		aether' = (aether WITH [filteringdatabase[aether[interface'].payload.destination].interface] := (aether[interface'] WITH .forwarder := me)) WITH [interface'] := EMPTYMETAMESSAGE;
+
+	[]
+        broadcast:
+	TRUE
+        -->
+
+		interface' IN {a : REALLINK | 
+                cable[a] AND
+		messagewaiting?(me, aether[a]) AND
+        	validmessage?(me, aether[a]) AND
+		(aether[a].payload.destination = topology!broadcast OR
+		 filteringdatabase[aether[a].payload.destination].interface = topology!NA)};
+
+                filteringdatabase' = IF filteringdatabase[aether[interface'].payload.source].acquisition = static THEN
+                        filteringdatabase
+                ELSE
+                        (filteringdatabase WITH [aether[interface'].payload.source].acquisition := dynamic) WITH [aether[interface'].payload.source].interface := interface'
+                ENDIF;
+
+                (FORALL (j : {v : REALLINK | cable[v]}) : aether'[j] = (IF j /= interface' THEN (aether[interface'] WITH .forwarder := me) ELSE EMPTYMETAMESSAGE ENDIF));
+
+	[]
+        discard:
+	TRUE
+        -->
+
+		interface' IN {a : REALLINK |
+                cable[a] AND
+		messagewaiting?(me, aether[a]) AND
+		aether[a].forwarder /= me AND
+        	((NOT(validmessage?(me, aether[a]))) OR
+         	filteringdatabase[aether[a].payload.destination].interface = a)};
+
+		filteringdatabase' = IF aether[interface'].payload.source /= me AND filteringdatabase[aether[interface'].payload.source].acquisition /= static THEN
+                        (filteringdatabase WITH [aether[interface'].payload.source].acquisition := dynamic) WITH [aether[interface'].payload.source].interface := interface'
+		ELSE
+			filteringdatabase
+                ENDIF;
+                aether'[interface'] = EMPTYMETAMESSAGE;
+	
+]
+
+END;
+
+proposed [me : HOST, cable : ARRAY REALLINK OF BOOLEAN, staticentries : ARRAY HOST OF REALLINK] : MODULE = 
+BEGIN
+
+LOCAL filteringdatabase : LOOKUPTABLE
+LOCAL interface : topology!LINK
+GLOBAL aether : NETWORK
+
+INITIALIZATION
+(FORALL (j : HOST) :
+	filteringdatabase[j] =
+		IF staticentries[j] = topology!NA THEN
+			(# acquisition := empty, interface := topology!NA #)
+		ELSE
+			(# acquisition := static, interface := staticentries[j] #)
+		ENDIF);
+interface = topology!NA
+
+TRANSITION
+[
+
+	unicast:
+	TRUE
+	-->
+		interface' IN {a : REALLINK | 
+		cable[a] AND
+		messagewaiting?(me, aether[a]) AND
+		validmessage?(me, aether[a]) AND
+		(filteringdatabase[aether[a].payload.source].acquisition /= static OR (filteringdatabase[aether[a].payload.source].acquisition = static AND a = filteringdatabase[aether[a].payload.source].interface)) AND
+		filteringdatabase[aether[a].payload.destination].interface /= topology!NA AND
+		filteringdatabase[aether[a].payload.destination].interface /= a};
+
+		filteringdatabase' = IF filteringdatabase[aether[interface'].payload.source].acquisition = static THEN
+			filteringdatabase
+		ELSE
+			(filteringdatabase WITH [aether[interface'].payload.source].acquisition := dynamic) WITH [aether[interface'].payload.source].interface := interface'
+		ENDIF;
+		
+		aether' = (aether WITH [filteringdatabase[aether[interface'].payload.destination].interface] := (aether[interface'] WITH .forwarder := me)) WITH [interface'] := EMPTYMETAMESSAGE;
+
+	[]
+        broadcast:
+	TRUE
+        -->
+
+		interface' IN {a : REALLINK | 
+                cable[a] AND
+		messagewaiting?(me, aether[a]) AND
+        	validmessage?(me, aether[a]) AND
+		(filteringdatabase[aether[a].payload.source].acquisition /= static OR (filteringdatabase[aether[a].payload.source].acquisition = static AND a = filteringdatabase[aether[a].payload.source].interface)) AND
+		(aether[a].payload.destination = topology!broadcast OR
+		 filteringdatabase[aether[a].payload.destination].interface = topology!NA)};
+
+                filteringdatabase' = IF filteringdatabase[aether[interface'].payload.source].acquisition = static THEN
+                        filteringdatabase
+                ELSE
+                        (filteringdatabase WITH [aether[interface'].payload.source].acquisition := dynamic) WITH [aether[interface'].payload.source].interface := interface'
+                ENDIF;
+
+                (FORALL (j : {v : REALLINK | cable[v]}) : aether'[j] = (IF j /= interface' THEN (aether[interface'] WITH .forwarder := me) ELSE EMPTYMETAMESSAGE ENDIF));
+
+	[]
+        discard:
+	TRUE
+        -->
+
+		interface' IN {a : REALLINK |
+                cable[a] AND
+		messagewaiting?(me, aether[a]) AND
+		aether[a].forwarder /= me AND
+        	((NOT(validmessage?(me, aether[a]))) OR
+         	filteringdatabase[aether[a].payload.destination].interface = a OR
+		(filteringdatabase[aether[a].payload.source].acquisition = static AND a /= filteringdatabase[aether[a].payload.source].interface))};
+
+		filteringdatabase' = IF aether[interface'].payload.source /= me AND
+			filteringdatabase[aether[interface'].payload.source].acquisition /= static THEN
+                        (filteringdatabase WITH [aether[interface'].payload.source].acquisition := dynamic) WITH [aether[interface'].payload.source].interface := interface'
+		ELSE
+			filteringdatabase
+                ENDIF;
+                aether'[interface'] = EMPTYMETAMESSAGE;
+	
+]
+
+END;
+
+END

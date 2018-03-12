@@ -1,0 +1,22 @@
+topology : CONTEXT = 
+BEGIN
+
+NODE : TYPE = {none, alice, hub, bob, broadcast};
+CLIENT : TYPE = {u : topology!NODE | u/= hub AND u /= topology!none AND u /= topology!broadcast};
+LINK : TYPE = {NA, AH, HB};
+LOGICALNETWORKADDR : TYPE = {null, localdomain};
+CATEGORY : TYPE = {c0};
+
+IMPORTING network;
+
+execute : MODULE = 
+  establishconnections
+  []host!stateful[alice, AH, FALSE, localdomain, 1]
+  []repeater!repeater[hub, [[i : REALLINK] i = AH OR i = HB]]
+  []host!stateful[bob, HB, FALSE, localdomain, 1];
+
+%% each host can send and receive the other's message
+group1_test1_0_false : THEOREM execute |- G(received.2.author /= alice);
+group1_test2_0_false : THEOREM execute |- G(received.1.author /= bob);
+
+END

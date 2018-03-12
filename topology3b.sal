@@ -1,0 +1,63 @@
+topology : CONTEXT = 
+BEGIN
+
+NODE : TYPE = {none, switch, alice, bob, carlos, broadcast};
+CLIENT : TYPE = {u : topology!NODE | u /= topology!none AND u /= topology!broadcast};
+LINK : TYPE = {NA, A, B, C};
+LOGICALNETWORKADDR : TYPE = {null, localdomain};
+CATEGORY : TYPE = {c0};
+
+IMPORTING network;
+
+execute : MODULE = 
+  establishconnections
+  []bridge!proposed[switch, [[i : REALLINK] i = A OR i = B OR i = C], [[p : HOST] IF p = alice THEN A ELSE NA ENDIF]]
+  []host!stateless[alice, A, TRUE, localdomain, 1]
+  []host!stateless[bob, B, TRUE, localdomain, 1]
+  []host!stateless[carlos, C, TRUE, localdomain, 1];
+
+%% broadcast connectivity tests
+group1_test1_0_false : THEOREM execute |- G(NOT(aether[A].author = bob AND aether[A].payload.destination = broadcast AND aether[A].forwarder = switch));
+group1_test2_0_false : THEOREM execute |- G(NOT(aether[A].author = carlos AND aether[A].payload.destination = broadcast AND aether[A].forwarder = switch));
+group1_test3_0_false : THEOREM execute |- G(NOT(aether[B].author = alice AND aether[B].payload.destination = broadcast AND aether[B].forwarder = switch));
+group1_test4_0_false : THEOREM execute |- G(NOT(aether[B].author = carlos AND aether[B].payload.destination = broadcast AND aether[B].forwarder = switch));
+group1_test5_0_false : THEOREM execute |- G(NOT(aether[C].author = alice AND aether[C].payload.destination = broadcast AND aether[C].forwarder = switch));
+group1_test6_0_false : THEOREM execute |- G(NOT(aether[C].author = bob AND aether[C].payload.destination = broadcast AND aether[C].forwarder = switch));
+
+%% switch broadcasts when it can't resolve a host to a port
+group2_test1_0_false : THEOREM execute |- G(NOT(aether[B].forwarder = switch AND aether[B].payload.destination = bob AND filteringdatabase[bob].interface = NA));
+group2_test2_0_false : THEOREM execute |- G(NOT(aether[C].forwarder = switch AND aether[C].payload.destination = carlos AND filteringdatabase[carlos].interface = NA));
+
+%% unicast connectivity tests
+group3_test1_0_false : THEOREM execute |- G(NOT(aether[A].author = bob AND aether[A].payload.destination = alice AND filteringdatabase[alice].interface = A));
+group3_test2_0_false : THEOREM execute |- G(NOT(aether[A].author = carlos AND aether[A].payload.destination = alice AND filteringdatabase[alice].interface = A));
+group3_test3_0_false : THEOREM execute |- G(NOT(aether[B].author = alice AND aether[B].payload.destination = bob AND filteringdatabase[bob].interface = B));
+group3_test4_0_false : THEOREM execute |- G(NOT(aether[B].author = carlos AND aether[B].payload.destination = bob AND filteringdatabase[bob].interface = B));
+group3_test5_0_false : THEOREM execute |- G(NOT(aether[C].author = alice AND aether[C].payload.destination = carlos AND filteringdatabase[carlos].interface = C));
+group3_test6_0_false : THEOREM execute |- G(NOT(aether[C].author = bob AND aether[C].payload.destination = carlos AND filteringdatabase[carlos].interface = C));
+
+%% static entry tests
+group4_test1_0_true : THEOREM execute |- G(filteringdatabase[alice].acquisition = bridge!static AND filteringdatabase[alice].interface = A);
+group4_test2_0_true : THEOREM execute |- G(NOT(aether[B].forwarder = switch AND aether[B].payload.destination = alice));
+group4_test3_0_true : THEOREM execute |- G(NOT(aether[C].forwarder = switch AND aether[C].payload.destination = alice));
+group4_test4_0_true : THEOREM execute |- G(NOT(aether[B].forwarder = switch AND aether[B].payload.source = alice AND aether[B].author /= alice));
+group4_test5_0_true : THEOREM execute |- G(NOT(aether[C].forwarder = switch AND aether[C].payload.source = alice AND aether[C].author /= alice));
+
+%% multiple physical addresses can map to a single port and in this case is spoofed
+group5_test1_0_false : THEOREM execute |- G(NOT(aether[A].forwarder = switch AND aether[A].payload.destination = bob AND filteringdatabase[bob].interface = A));
+
+%% filtering database sanity checks
+group6_test1_0_true : THEOREM execute |- G(filteringdatabase[switch].acquisition = bridge!empty AND filteringdatabase[switch].interface = NA);
+group6_test2_0_true : THEOREM execute |- G(filteringdatabase[bob].acquisition /= bridge!static);
+group6_test3_0_true : THEOREM execute |- G(filteringdatabase[carlos].acquisition /= bridge!static);
+group6_test4_0_true : THEOREM execute |- G (FORALL (h : HOST) : filteringdatabase[h].acquisition = bridge!empty <=> filteringdatabase[h].interface = NA);
+
+%% host message generation and switch forwarding sanity checks
+group7_test1_0_true : THEOREM execute |- G(NOT(aether[A].author = alice AND aether[A].forwarder = switch));
+group7_test2_0_true : THEOREM execute |- G(NOT(aether[B].author = bob AND aether[B].forwarder = switch));
+group7_test3_0_true : THEOREM execute |- G(NOT(aether[C].author = carlos AND aether[C].forwarder = switch));
+
+%% source address can be spoofed, filtering database updated with dynamic entry and message forwarded
+group8_test1_0_false : THEOREM execute |- G(FORALL (a : REALLINK) : aether[a].forwarder /= none => aether[a].payload.source = aether[a].author);
+
+END

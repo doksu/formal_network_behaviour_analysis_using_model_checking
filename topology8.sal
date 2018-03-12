@@ -1,0 +1,73 @@
+topology : CONTEXT = 
+BEGIN
+
+NODE : TYPE = {none, publichost, extrouter, bastionhost, introuter, privatehost, broadcast};
+CLIENT : TYPE = {u : topology!NODE | u /= topology!none AND u /= topology!broadcast};
+LINK : TYPE = {NA, E, T, I};
+LOGICALNETWORKADDR : TYPE = {null, public, dmz, private};
+FIREWALLSIZE : TYPE = [1..1];
+CATEGORY : TYPE = {c0, c1};
+
+IMPORTING network;
+
+execute : MODULE = 
+ establishconnections
+
+ []host!trustedsystem[publichost, E, TRUE, public, 1]
+ []host!trustedsystem[bastionhost, T, TRUE, dmz, 1]
+ []host!trustedsystem[privatehost, I, TRUE, private, 1]
+
+ []router!router[
+        extrouter,
+        FALSE,
+        [[i : REALLINK] i = E OR i = T],
+        [[u : LOGICALNETWORK] IF u = public THEN E ELSIF u = dmz THEN T ELSE NA ENDIF],
+        [[x : LOGICALNETWORK] [[y : LOGICALNETWORK] IF x = private AND y = dmz THEN introuter ELSE none ENDIF]],
+        (# lognet := null, loghost := none #),
+        [[r : FIREWALLSIZE] (# SRC_host := none, SRC_net := null, DST_host := none, DST_net := null, action := ACCEPT #)],
+        [[y : REALLINK] y = T OR y = I],
+        [[z : REALLINK] [[c : CATEGORY] (z = T AND c = c0) OR z = I]]]
+
+ []router!router[
+        introuter,
+        FALSE,
+        [[i : REALLINK] i = T OR i = I],
+        [[u : LOGICALNETWORK] IF u = dmz THEN T ELSIF u = private THEN I ELSE NA ENDIF],
+        [[x : LOGICALNETWORK] [[y : LOGICALNETWORK] IF x = public AND y = dmz THEN extrouter ELSE none ENDIF ]],
+        (# lognet := null, loghost := none #),
+        [[r : FIREWALLSIZE] (# SRC_host := none, SRC_net := null, DST_host := none, DST_net := null, action := ACCEPT #)],
+        [[y : REALLINK] y = T OR y = I],
+        [[z : REALLINK] [[c : CATEGORY] (z = T AND c = c0) OR z = I]]];
+
+%% Uncategorised connectivity
+%% To translate received variables to hosts: ... | sed 's/1.1/publichost/' | sed 's/1.2/bastionhost/' | sed 's/2/privatehost/'
+group1_test1_9_false : THEOREM execute |- G(received.1.1.author /= privatehost);
+group1_test2_5_false : THEOREM execute |- G(received.1.1.author /= bastionhost);
+group1_test3_5_false : THEOREM execute |- G(received.1.2.author /= privatehost);
+group1_test4_5_false : THEOREM execute |- G(received.1.2.author /= publichost);
+group1_test5_9_false : THEOREM execute |- G(received.2.author /= publichost);
+group1_test6_5_false : THEOREM execute |- G(received.2.author /= bastionhost);
+
+%% Expected categorised flows
+group2_test1_9_false : THEOREM execute |- G(NOT(received.1.2.author = privatehost AND received.1.2.payload.payload.label[c0]));
+group2_test2_9_false : THEOREM execute |- G(NOT(received.2.author = bastionhost AND received.2.payload.payload.label[c0]));
+
+%% Unexpected categorised down flows
+% Categorised traffic should not flow down to the public network
+group3_test1_12_true : THEOREM execute |- G(aether[E].forwarder /= none => NOT(aether[E].payload.payload.label[c0] OR aether[E].payload.payload.label[c1]));
+% c1 categorised traffic should not flow down to the dmz network 
+group3_test2_12_true : THEOREM execute |- G(aether[T].forwarder /= none => aether[T].payload.payload.label[c1] = false);
+
+%% Unexpected categorised up flows
+% Categorised traffic should never be forwarded from the public to the dmz network
+group4_test1_12_true : THEOREM execute |- G(aether[T].forwarder = extrouter => NOT(aether[T].payload.payload.label[c0] OR aether[T].payload.payload.label[c1]));
+% c1 categorised traffic should never be forwarded from the dmz to the private network
+group4_test2_12_true : THEOREM execute |- G(aether[I].forwarder /= none => aether[I].payload.payload.label[c1] = false);
+
+%% Unexpected inter-process categorised flows
+% An uncategorised process on the bastion host can never receive categorised traffic
+group5_test1_12_true : THEOREM execute |- G(processcategories.1.2[c0] = false => received.1.2.payload.payload.label[c0] = false);
+% A process without c0 clearance on the private host can never receive c0 traffic
+group5_test2_12_true : THEOREM execute |- G(processcategories.2[c0] = false => received.2.payload.payload.label[c0] = false);
+
+END

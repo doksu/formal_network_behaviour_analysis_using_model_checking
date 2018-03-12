@@ -1,0 +1,97 @@
+topology : CONTEXT = 
+BEGIN
+
+NODE : TYPE = {none, alice, bob, carlos, dave, router, broadcast};
+CLIENT : TYPE = {u : topology!NODE | u /= topology!none AND u /= topology!broadcast};
+LINK : TYPE = {NA, A, B, C, D};
+LOGICALNETWORKADDR : TYPE = {null, left, top, right, bottom};
+FIREWALLSIZE : TYPE = [1..1];
+CATEGORY : TYPE = {c0};
+
+IMPORTING network;
+
+execute : MODULE = 
+ establishconnections
+
+ []host!trustedsystem[alice, A, TRUE, left, 1]
+ []host!trustedsystem[bob, B, TRUE, right, 1]
+ []host!trustedsystem[carlos, C, TRUE, top, 1]
+ []host!trustedsystem[dave, D, TRUE, bottom, 1]
+
+ []router!router[
+	router,
+        FALSE,
+        [[i : REALLINK] TRUE],
+        [[u : LOGICALNETWORK] IF u = left THEN A ELSIF u = right THEN B ELSIF u = top THEN C ELSE D ENDIF],
+        [[x : LOGICALNETWORK] [[y : LOGICALNETWORK] none ]],
+        (# lognet := null, loghost := none #),
+        [[r : FIREWALLSIZE] (# SRC_host := none, SRC_net := null, DST_host := none, DST_net := null, action := ACCEPT #)],
+	[[y : REALLINK] y = A OR y = B],
+        [[z : REALLINK] [[c : CATEGORY] z = B OR z = D]]];
+
+
+%% Normal uncategorised traffic reachability tests
+
+% Bob can send to Alice
+group1_test1_4_false : THEOREM execute |- G(NOT(aether[A].forwarder = router AND aether[A].author = bob AND aether[A].payload.payload.label[c0] = false));
+
+% Carlos can send to Alice
+group1_test2_4_false : THEOREM execute |- G(NOT(aether[A].forwarder = router AND aether[A].author = carlos AND aether[A].payload.payload.label[c0] = false));
+
+% Alice can send to Bob
+group1_test3_4_false : THEOREM execute |- G(NOT(aether[B].forwarder = router AND aether[B].author = alice AND aether[B].payload.payload.label[c0] = false));
+
+% Carlos can send to Bob
+group1_test4_4_false : THEOREM execute |- G(NOT(aether[B].forwarder = router AND aether[B].author = carlos AND aether[B].payload.payload.label[c0] = false));
+
+% Alice can send to Carlos
+group1_test5_4_false : THEOREM execute |- G(NOT(aether[C].forwarder = router AND aether[C].author = alice AND aether[C].payload.payload.label[c0] = false));
+
+% Bob can send to Carlos
+group1_test6_4_false : THEOREM execute |- G(NOT(aether[C].forwarder = router AND aether[C].author = bob AND aether[C].payload.payload.label[c0] = false));
+
+% Alice can send to Dave
+group1_test7_4_false : THEOREM execute |- G(NOT(aether[D].forwarder = router AND aether[D].author = alice AND aether[D].payload.payload.label[c0] = false));
+
+% Bob can send to Dave
+group1_test8_4_false : THEOREM execute |- G(NOT(aether[D].forwarder = router AND aether[D].author = bob AND aether[D].payload.payload.label[c0] = false AND processcategories.1.1.2[c0] = false));
+
+% Carlos can send to Dave
+group1_test9_4_false : THEOREM execute |- G(NOT(aether[D].forwarder = router AND aether[D].author = carlos AND aether[D].payload.payload.label[c0] = false));
+
+
+%% Expected categorised flows
+
+% Bob can send c0 traffic to Dave
+group2_test1_4_false : THEOREM execute |- G(NOT(aether[D].author = bob AND aether[D].payload.payload.label[c0] = false AND processcategories.1.1.2[c0] = true));
+
+% Dave can send c0 traffic to Bob
+group2_test2_4_false : THEOREM execute |- G(NOT(aether[B].author = dave AND aether[B].payload.payload.label[c0] = true));
+
+
+%% Expected categorised flow restrictions
+
+% Carlos can never receive categorised traffic
+group3_test1_0_true : THEOREM execute |- G(NOT(aether[C].forwarder = router AND aether[C].payload.payload.label[c0] = true));
+
+% Alice can never receive categorised traffic
+group3_test2_0_true : THEOREM execute |- G(NOT(aether[A].forwarder = router AND aether[A].payload.payload.label[c0] = true));
+
+% Dave can never receive labelled traffic
+group3_test3_0_true : THEOREM execute |- G(NOT(aether[D].forwarder = router AND aether[D].payload.payload.label[c0] = true));
+
+% Dave cannot send to Alice
+group3_test4_0_true : THEOREM execute |- G(NOT(aether[A].forwarder = router AND aether[A].author = dave));
+
+% Dave cannot send to Carlos
+group3_test5_0_true : THEOREM execute |- G(NOT(aether[C].forwarder = router AND aether[C].author = dave));
+
+% Any categorised traffic routed to Bob cannot be from Alice nor Carlos
+group3_test6_0_true : THEOREM execute |- G(NOT(aether[B].forwarder = router AND aether[B].payload.payload.label[c0] = true AND (aether[B].author = alice OR aether[B].author = carlos)));
+
+%% Inter-process communication restrictions based on process clearance
+
+% An unauthorised process on Bob can never receive classified traffic
+group4_test1_0_true : THEOREM execute |- G(processcategories.1.1.2[c0] = false => received.1.1.2.payload.payload.label[c0] = false);
+
+END

@@ -1,0 +1,290 @@
+router : CONTEXT = 
+BEGIN
+
+IMPORTING network;
+
+sourcenetworkvalid(receptioninterface : REALLINK, attached : ARRAY LOGICALNETWORK OF topology!LINK, routes : ARRAY LOGICALNETWORK OF ARRAY LOGICALNETWORK OF topology!NODE, defaultroute : [# lognet : topology!LOGICALNETWORKADDR, loghost : topology!NODE #], aether : NETWORK) : BOOLEAN =
+	receptioninterface = attached[aether[receptioninterface].payload.payload.sourcenetwork] OR
+	(EXISTS (c : LOGICALNETWORK) : routes[aether[receptioninterface].payload.payload.sourcenetwork][c] /= topology!none AND receptioninterface = attached[c]) OR
+	(receptioninterface = attached[defaultroute.lognet] AND attached[aether[receptioninterface].payload.payload.sourcenetwork] = topology!NA AND NOT (EXISTS (c : LOGICALNETWORK) : routes[aether[receptioninterface].payload.payload.sourcenetwork][c] /= topology!none AND receptioninterface = attached[c]));
+
+arprequest?(me : HOST, msg : METAMESSAGE, interface : REALLINK, attached : ARRAY LOGICALNETWORK OF topology!LINK) : BOOLEAN =
+	msg.payload.source /= me AND
+	msg.payload.source /= topology!broadcast AND
+        msg.payload.destination = topology!broadcast AND
+        msg.payload.payload.destinationhost = me AND
+        attached[msg.payload.payload.destinationnetwork] = interface AND
+        msg.payload.payload.sourcehost /= me AND
+        msg.payload.payload.sourcenetwork = msg.payload.payload.destinationnetwork;
+
+messagewaiting?(me : HOST, msg : METAMESSAGE) : BOOLEAN =
+        msg.author /= topology!none AND
+        msg.author /= me AND
+        msg.forwarder /= me;
+
+validmessage?(me : HOST, msg : METAMESSAGE, attached : ARRAY LOGICALNETWORK OF topology!LINK) : BOOLEAN =
+	msg.payload.source /= me AND
+        (msg.payload.destination = me OR
+         msg.payload.destination = topology!broadcast) AND
+        msg.payload.source /= msg.payload.destination AND
+	IF attached[msg.payload.payload.sourcenetwork] /= topology!NA THEN
+		msg.payload.payload.sourcehost /= me  ELSE TRUE ENDIF;
+
+permittraffic?(firewall_rules : ARRAY topology!FIREWALLSIZE OF ACL, msg : METAMESSAGE) : BOOLEAN =
+	EXISTS (r : topology!FIREWALLSIZE) : (firewall_rules[r].action = ACCEPT AND
+
+		( (firewall_rules[r].SRC_host = topology!none AND
+			(firewall_rules[r].SRC_net = msg.payload.payload.sourcenetwork OR firewall_rules[r].SRC_net = topology!null))
+		  OR
+		  (firewall_rules[r].SRC_host = msg.payload.payload.sourcehost AND firewall_rules[r].SRC_net = msg.payload.payload.sourcenetwork)
+		)
+		AND
+		( (firewall_rules[r].DST_host = topology!none AND
+                        (firewall_rules[r].DST_net = msg.payload.payload.destinationnetwork OR firewall_rules[r].DST_net = topology!null))
+                  OR
+                  (firewall_rules[r].DST_host = msg.payload.payload.destinationhost AND firewall_rules[r].DST_net = msg.payload.payload.destinationnetwork)
+                )
+
+		AND NOT (EXISTS (f : topology!FIREWALLSIZE) : (firewall_rules[f].action = DISCARD AND
+
+			( (firewall_rules[f].SRC_host = topology!none AND
+                        	(firewall_rules[f].SRC_net = msg.payload.payload.sourcenetwork OR firewall_rules[f].SRC_net = topology!null))
+                  	OR
+                  	(firewall_rules[f].SRC_host = msg.payload.payload.sourcehost AND firewall_rules[f].SRC_net = msg.payload.payload.sourcenetwork)
+                	)
+                	AND
+                	( (firewall_rules[f].DST_host = topology!none AND
+			  	(firewall_rules[f].DST_net = msg.payload.payload.destinationnetwork OR firewall_rules[f].DST_net = topology!null))
+                  	OR
+                  	(firewall_rules[f].DST_host = msg.payload.payload.destinationhost AND firewall_rules[f].DST_net = msg.payload.payload.destinationnetwork)
+                	)
+			AND f < r)));
+
+router [me : HOST, donotchecksource : BOOLEAN, cable : ARRAY REALLINK OF BOOLEAN, attached : ARRAY LOGICALNETWORK OF topology!LINK, routes : ARRAY LOGICALNETWORK OF ARRAY LOGICALNETWORK OF topology!NODE, defaultroute : [# lognet : topology!LOGICALNETWORKADDR, loghost : topology!NODE #], firewall_rules : ARRAY topology!FIREWALLSIZE OF ACL, interfacelabel : LABELPOLICY, networkclearance : NETWORKCLEARANCE] : MODULE = 
+BEGIN
+
+LOCAL resolv : ARPTABLE
+LOCAL interface : topology!LINK
+LOCAL nexthopnetwork : topology!LOGICALNETWORKADDR
+LOCAL resolvaddr : topology!NODE
+GLOBAL aether : NETWORK
+
+INITIALIZATION
+resolv = [[p : topology!NODE] (# phyaddr := topology!none, interface := topology!NA #)];
+interface = topology!NA;
+nexthopnetwork = topology!null;
+resolvaddr = topology!none
+
+TRANSITION
+[
+
+	sendARPresponse:
+	TRUE
+	-->
+		interface' IN {a : REALLINK |
+                cable[a] AND
+                messagewaiting?(me, aether[a]) AND
+		arprequest?(me, aether[a], a, attached)};
+
+		resolv'[aether[interface'].payload.payload.sourcehost] =
+                        IF attached[aether[interface'].payload.payload.sourcenetwork] = interface' THEN
+                                (# phyaddr := aether[interface'].payload.source, interface := interface' #)
+                        ELSE
+                                resolv[aether[interface'].payload.payload.sourcehost]
+                        ENDIF;
+
+		aether' = aether WITH [interface'] := (((((((EMPTYMETAMESSAGE WITH .author := me) WITH .payload.source := me) WITH .payload.destination := aether[interface'].payload.source) WITH .payload.payload.sourcenetwork := aether[interface'].payload.payload.sourcenetwork) WITH .payload.payload.sourcehost := me) WITH .payload.payload.destinationnetwork := aether[interface'].payload.payload.destinationnetwork) WITH .payload.payload.destinationhost := aether[interface'].payload.payload.sourcehost)
+
+	[]
+	sendARPtoresolvenexthop:
+	TRUE
+	-->
+		interface' IN {a : REALLINK |
+                cable[a] AND
+                messagewaiting?(me, aether[a]) AND
+                validmessage?(me, aether[a], attached) AND
+                aether[a].payload.destination /= topology!broadcast AND
+                aether[a].payload.payload.destinationhost /= me AND
+                aether[a].payload.payload.destinationhost /= topology!broadcast AND
+                attached[aether[a].payload.payload.destinationnetwork] = topology!NA AND
+                (EXISTS (b : LOGICALNETWORK) :
+                 routes[aether[a].payload.payload.destinationnetwork][b] /= topology!none) AND
+		(FORALL (c : LOGICALNETWORK) :
+                        routes[aether[a].payload.payload.destinationnetwork][c] /= topology!none =>
+                                resolv[routes[aether[a].payload.payload.destinationnetwork][c]].interface /= attached[c] AND aether[attached[c]].payload.payload.sourcehost /= routes[aether[a].payload.payload.destinationnetwork][c]) AND
+                (sourcenetworkvalid(a, attached, routes, defaultroute, aether) OR donotchecksource)};
+
+		nexthopnetwork' IN {b : LOGICALNETWORK |
+                routes[aether[interface'].payload.payload.destinationnetwork][b] /= topology!none AND
+                (resolv[routes[aether[interface'].payload.payload.destinationnetwork][b]].phyaddr = topology!none OR (resolv[routes[aether[interface'].payload.payload.destinationnetwork][b]].phyaddr /= topology!none AND resolv[routes[aether[interface'].payload.payload.destinationnetwork][b]].interface /= attached[b])) AND
+                aether[attached[b]].payload.source /= me AND
+                aether[attached[b]].payload.destination /= topology!broadcast AND
+                aether[attached[b]].payload.payload.destinationhost /= routes[aether[interface'].payload.payload.destinationnetwork][b] AND
+                aether[attached[b]].payload.payload.destinationnetwork /= b AND
+                aether[attached[b]].payload.payload.sourcehost /= me AND
+                aether[attached[b]].payload.payload.sourcenetwork /= b};
+
+                aether' = aether WITH [attached[nexthopnetwork']] := (((((((EMPTYMETAMESSAGE WITH .author := me) WITH .payload.source := me) WITH .payload.destination := topology!broadcast) WITH .payload.payload.sourcenetwork := nexthopnetwork') WITH .payload.payload.sourcehost := me) WITH .payload.payload.destinationnetwork := nexthopnetwork') WITH .payload.payload.destinationhost := routes[aether[interface'].payload.payload.destinationnetwork][nexthopnetwork'])
+
+	[]
+	sendARPtoresolvedefaultroute:
+	defaultroute.lognet /= topology!null
+        -->
+                interface' IN {a : REALLINK |
+                cable[a] AND
+                messagewaiting?(me, aether[a]) AND
+                validmessage?(me, aether[a], attached) AND
+		aether[a].payload.destination /= topology!broadcast AND
+                aether[a].payload.payload.destinationhost /= me AND
+                aether[a].payload.payload.destinationhost /= topology!broadcast AND
+                attached[defaultroute.lognet] /= resolv[defaultroute.loghost].interface AND
+		attached[aether[a].payload.payload.destinationnetwork] = topology!NA AND
+                (FORALL (b : LOGICALNETWORK) :
+                 routes[aether[a].payload.payload.destinationnetwork][b] = topology!none) AND
+
+		aether[attached[defaultroute.lognet]].payload.source /= me AND
+        	aether[attached[defaultroute.lognet]].payload.destination /= topology!broadcast AND
+        	aether[attached[defaultroute.lognet]].payload.payload.destinationhost /= defaultroute.loghost AND
+        	aether[attached[defaultroute.lognet]].payload.payload.destinationnetwork /= defaultroute.lognet AND
+        	aether[attached[defaultroute.lognet]].payload.payload.sourcehost /= me AND
+        	aether[attached[defaultroute.lognet]].payload.payload.sourcenetwork /= defaultroute.lognet AND
+
+		aether[attached[defaultroute.lognet]].payload.payload.sourcehost /= defaultroute.loghost AND
+
+                (sourcenetworkvalid(a, attached, routes, defaultroute, aether) OR donotchecksource)};
+
+                aether' = aether WITH [attached[defaultroute.lognet]] := (((((((EMPTYMETAMESSAGE WITH .author := me) WITH .payload.source := me) WITH .payload.destination := topology!broadcast) WITH .payload.payload.sourcenetwork := defaultroute.lognet) WITH .payload.payload.sourcehost := me) WITH .payload.payload.destinationnetwork := defaultroute.lognet) WITH .payload.payload.destinationhost := defaultroute.loghost)
+
+	[]
+	localdelivery:
+	TRUE
+        -->
+                interface' IN {a : REALLINK |
+                cable[a] AND
+                messagewaiting?(me, aether[a]) AND
+                validmessage?(me, aether[a], attached) AND
+		NOT(arprequest?(me, aether[a], a, attached)) AND
+		attached[aether[a].payload.payload.destinationnetwork] /= topology!NA AND
+                (aether[a].payload.payload.destinationhost = me OR
+                 aether[a].payload.payload.destinationhost = topology!broadcast) AND
+		(sourcenetworkvalid(a, attached, routes, defaultroute, aether) OR donotchecksource) AND
+		((interfacelabel[a] = FALSE AND (FORALL (c : topology!CATEGORY) : aether[a].payload.payload.label[c] = FALSE)) OR (interfacelabel[a] AND (FORALL (c : topology!CATEGORY) : (NOT(aether[a].payload.payload.label[c]) OR networkclearance[a][c]))))};
+
+                resolv'[aether[interface'].payload.payload.sourcehost] = 
+			IF attached[aether[interface'].payload.payload.sourcenetwork] = interface' THEN
+				(# phyaddr := aether[interface'].payload.source, interface := interface' #)
+			ELSE
+				resolv[aether[interface'].payload.payload.sourcehost]
+			ENDIF;
+
+		aether'[interface'] = EMPTYMETAMESSAGE
+
+	[]
+	directlyattachedroute:
+	TRUE
+	-->
+		interface' IN {a : REALLINK | 
+		cable[a] AND
+		messagewaiting?(me, aether[a]) AND
+		validmessage?(me, aether[a], attached) AND
+		aether[a].payload.destination /= topology!broadcast AND
+		attached[aether[a].payload.payload.destinationnetwork] /= topology!NA AND
+        	aether[a].payload.payload.destinationhost /= me AND
+        	aether[a].payload.payload.destinationhost /= topology!broadcast AND
+		resolv[aether[a].payload.payload.destinationhost].phyaddr /= topology!none AND
+		resolv[aether[a].payload.payload.destinationhost].interface = attached[aether[a].payload.payload.destinationnetwork] AND
+		(sourcenetworkvalid(a, attached, routes, defaultroute, aether) OR donotchecksource) AND
+		((interfacelabel[a] = FALSE AND (FORALL (c : topology!CATEGORY) : aether[a].payload.payload.label[c] = FALSE AND (NOT(networkclearance[a][c]) OR networkclearance[resolv[aether[a].payload.payload.destinationhost].interface][c]))) OR (interfacelabel[a] AND (FORALL (c : topology!CATEGORY) : (NOT(aether[a].payload.payload.label[c]) OR (networkclearance[a][c] AND networkclearance[resolv[aether[a].payload.payload.destinationhost].interface][c]))))) AND
+		permittraffic?(firewall_rules, aether[a])};
+
+		resolv'[aether[interface'].payload.payload.sourcehost] =
+			IF attached[aether[interface'].payload.payload.sourcenetwork] = interface' THEN
+                                (# phyaddr := aether[interface'].payload.source, interface := interface' #)
+                        ELSE
+                                resolv[aether[interface'].payload.payload.sourcehost]
+                        ENDIF;
+
+		aether' = (aether WITH [attached[aether[interface'].payload.payload.destinationnetwork]] := ((((aether[interface'] WITH .forwarder := me) WITH .payload.source := me) WITH .payload.destination := resolv[aether[interface'].payload.payload.destinationhost].phyaddr) WITH .payload.payload.label := IF interfacelabel[interface'] = FALSE AND interfacelabel[attached[aether[interface'].payload.payload.destinationnetwork]] THEN networkclearance[interface'] ELSIF interfacelabel[interface'] AND interfacelabel[attached[aether[interface'].payload.payload.destinationnetwork]] = FALSE THEN EMPTYLABEL ELSE aether[interface'].payload.payload.label ENDIF)) WITH [interface'] := EMPTYMETAMESSAGE
+
+	[]
+	nexthoproute:
+	TRUE
+	-->
+                interface' IN {a : REALLINK |
+                cable[a] AND
+                messagewaiting?(me, aether[a]) AND
+                validmessage?(me, aether[a], attached) AND
+		aether[a].payload.destination /= topology!broadcast AND
+                aether[a].payload.payload.destinationhost /= me AND
+                aether[a].payload.payload.destinationhost /= topology!broadcast AND
+		(EXISTS (b : LOGICALNETWORK) : resolv[routes[aether[a].payload.payload.destinationnetwork][b]].phyaddr /= topology!none) AND
+		(sourcenetworkvalid(a, attached, routes, defaultroute, aether) OR donotchecksource) AND
+		permittraffic?(firewall_rules, aether[a])};
+
+		nexthopnetwork' IN {b : LOGICALNETWORK |
+		resolv[routes[aether[interface'].payload.payload.destinationnetwork][b]].phyaddr /= topology!none AND resolv[routes[aether[interface'].payload.payload.destinationnetwork][b]].interface = attached[b] AND
+		((interfacelabel[interface'] = FALSE AND (FORALL (c : topology!CATEGORY) : aether[interface'].payload.payload.label[c] = FALSE AND (NOT(networkclearance[interface'][c]) OR networkclearance[resolv[routes[aether[interface'].payload.payload.destinationnetwork][b]].interface][c]))) OR (interfacelabel[interface'] AND (FORALL (c : topology!CATEGORY) : (NOT(aether[interface'].payload.payload.label[c]) OR (networkclearance[interface'][c] AND networkclearance[resolv[routes[aether[interface'].payload.payload.destinationnetwork][b]].interface][c])))))};
+
+		resolv'[aether[interface'].payload.payload.sourcehost] =
+                	IF attached[aether[interface'].payload.payload.sourcenetwork] = interface' THEN
+                                (# phyaddr := aether[interface'].payload.source, interface := interface' #)
+                        ELSE
+                                resolv[aether[interface'].payload.payload.sourcehost]
+                        ENDIF;
+
+                aether' = (aether WITH [attached[nexthopnetwork']] := ((((aether[interface'] WITH .forwarder := me) WITH .payload.source := me) WITH .payload.destination := resolv[routes[aether[interface'].payload.payload.destinationnetwork][nexthopnetwork']].phyaddr) WITH .payload.payload.label := IF interfacelabel[interface'] = FALSE AND interfacelabel[attached[nexthopnetwork']] THEN networkclearance[interface'] ELSIF interfacelabel[interface'] AND interfacelabel[attached[nexthopnetwork']] = FALSE THEN EMPTYLABEL ELSE aether[interface'].payload.payload.label ENDIF)) WITH [interface'] := EMPTYMETAMESSAGE
+
+	[]
+	default:
+	defaultroute.lognet /= topology!null
+        -->     
+                interface' IN {a : REALLINK |
+                cable[a] AND
+                messagewaiting?(me, aether[a]) AND
+                validmessage?(me, aether[a], attached) AND
+		aether[a].payload.destination /= topology!broadcast AND
+		attached[aether[a].payload.payload.destinationnetwork] = topology!NA AND
+		(FORALL (b : LOGICALNETWORK) :
+                 routes[aether[a].payload.payload.destinationnetwork][b] = topology!none) AND
+                aether[a].payload.payload.destinationhost /= me AND
+		aether[a].payload.payload.destinationhost /= topology!broadcast AND
+		(sourcenetworkvalid(a, attached, routes, defaultroute, aether) OR donotchecksource) AND
+		resolv[defaultroute.loghost].interface = attached[defaultroute.lognet] AND
+		((interfacelabel[a] = FALSE AND (FORALL (c : topology!CATEGORY) : aether[a].payload.payload.label[c] = FALSE AND (NOT(networkclearance[a][c]) OR networkclearance[resolv[defaultroute.loghost].interface][c]))) OR (interfacelabel[a] AND (FORALL (c : topology!CATEGORY) : (NOT(aether[a].payload.payload.label[c]) OR (networkclearance[a][c] AND networkclearance[resolv[defaultroute.loghost].interface][c]))))) AND
+		permittraffic?(firewall_rules, aether[a])};
+
+		resolv'[aether[interface'].payload.payload.sourcehost] =
+                        IF attached[aether[interface'].payload.payload.sourcenetwork] = interface' THEN
+                                (# phyaddr := aether[interface'].payload.source, interface := interface' #)
+                        ELSE
+                                resolv[aether[interface'].payload.payload.sourcehost]
+                        ENDIF;
+
+                aether' = (aether WITH [attached[defaultroute.lognet]] := ((((aether[interface'] WITH .forwarder := me) WITH .payload.source := me) WITH .payload.destination := resolv[defaultroute.loghost].phyaddr) WITH .payload.payload.label := IF interfacelabel[interface'] = FALSE AND interfacelabel[attached[defaultroute.lognet]] THEN networkclearance[interface'] ELSIF interfacelabel[interface'] AND interfacelabel[attached[defaultroute.lognet]] = FALSE THEN EMPTYLABEL ELSE aether[interface'].payload.payload.label ENDIF)) WITH [interface'] := EMPTYMETAMESSAGE
+
+	[]
+	discard:
+	TRUE
+	-->
+		interface' IN {a : REALLINK |
+                cable[a] AND
+                messagewaiting?(me, aether[a]) AND
+		NOT(arprequest?(me, aether[a], a, attached)) AND
+		(NOT (validmessage?(me, aether[a], attached)) OR
+		 aether[a].payload.destination = topology!broadcast OR
+		 (NOT(sourcenetworkvalid(a, attached, routes, defaultroute, aether)) AND NOT(donotchecksource)))};
+	
+		resolv'[aether[interface'].payload.payload.sourcehost] =
+                        IF aether[interface'].payload.source /= me AND aether[interface'].payload.payload.sourcehost /= me AND attached[aether[interface'].payload.payload.sourcenetwork] = interface' THEN
+                                (# phyaddr := aether[interface'].payload.source, interface := interface' #)
+                        ELSE
+                                resolv[aether[interface'].payload.payload.sourcehost]
+                        ENDIF;
+	
+		aether'[interface'] = EMPTYMETAMESSAGE
+
+]
+
+END;
+
+END

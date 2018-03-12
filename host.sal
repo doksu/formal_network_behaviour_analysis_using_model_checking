@@ -1,0 +1,144 @@
+host : CONTEXT = 
+BEGIN
+
+IMPORTING network;
+
+stateful [ me : HOST, cable : REALLINK, faulted : BOOLEAN, mylognet : topology!LOGICALNETWORKADDR, nummsgstosend : nznat ] : MODULE =
+BEGIN
+
+LOCAL processcategories : network!CLEARANCE
+LOCAL received : METAMESSAGE
+LOCAL numsgsent : [0..nummsgstosend]
+LOCAL sendfromphyhost : {v : topology!CLIENT | faulted OR v = me}
+LOCAL sendfromloghost : {v : topology!CLIENT | faulted OR v = me}
+LOCAL sendfromlognet : {v : topology!LOGICALNETWORKADDR | v /= topology!null AND (faulted OR v = mylognet)}
+LOCAL sendtophyhost : {a : topology!NODE | a /= topology!none AND a /= me}
+LOCAL sendtologhost : {a : topology!CLIENT | a /= me OR faulted}
+LOCAL sendtolognet : {a : LOGICALNETWORK | TRUE}
+GLOBAL aether : NETWORK
+
+INITIALIZATION
+numsgsent = 0;
+received = EMPTYMETAMESSAGE;
+(FORALL (c : topology!CATEGORY) : processcategories[c] = FALSE);
+
+TRANSITION
+[
+
+        send:
+	numsgsent < nummsgstosend AND aether[cable].author = topology!none
+	-->
+		aether'[cable] = (# author := me, forwarder := topology!none, payload := (# source := sendfromphyhost, destination := sendtophyhost, payload:= (# sourcenetwork := sendfromlognet, sourcehost := sendfromloghost, destinationnetwork := sendtolognet, destinationhost := sendtologhost, label := processcategories #) #) #);
+		numsgsent' = numsgsent + 1;
+		
+		sendfromphyhost' IN {v : topology!CLIENT | faulted OR v = me};
+		sendfromloghost' IN {v : topology!CLIENT | faulted OR v = me};
+		sendfromlognet' IN {v : topology!LOGICALNETWORKADDR | v /= topology!null AND (faulted OR v = mylognet)};
+		sendtophyhost' IN {a : topology!NODE | a /= topology!none AND a /= me};
+		sendtologhost' IN {a : topology!CLIENT | a /= me OR faulted};
+		sendtolognet' IN {a : LOGICALNETWORK | TRUE}
+	
+        []
+        receive:
+	aether[cable].author /= topology!none AND
+	aether[cable].author /= me
+        -->
+                received' = aether[cable];
+                aether'[cable] = EMPTYMETAMESSAGE
+
+]
+
+END;
+
+stateless [ me : HOST, cable : REALLINK, faulted : BOOLEAN, mylognet : topology!LOGICALNETWORKADDR, nummsgstosend : nznat ] : MODULE =
+BEGIN
+
+LOCAL processcategories : network!CLEARANCE
+LOCAL numsgsent : [0..nummsgstosend]
+LOCAL sendfromphyhost : {v : topology!CLIENT | faulted OR v = me}
+LOCAL sendfromloghost : {v : topology!CLIENT | faulted OR v = me}
+LOCAL sendfromlognet : {v : topology!LOGICALNETWORKADDR | v /= topology!null AND (faulted OR v = mylognet)}
+LOCAL sendtophyhost : {a : topology!NODE | a /= topology!none AND a /= me}
+LOCAL sendtologhost : {a : topology!CLIENT | a /= me OR faulted}
+LOCAL sendtolognet : {a : LOGICALNETWORK | TRUE}
+GLOBAL aether : NETWORK
+
+INITIALIZATION
+numsgsent = 0;
+(FORALL (c : topology!CATEGORY) : processcategories[c] = FALSE);
+
+TRANSITION
+[
+
+        send:
+        numsgsent < nummsgstosend AND aether[cable].author = topology!none
+        -->
+                aether'[cable] = (# author := me, forwarder := topology!none, payload := (# source := sendfromphyhost, destination := sendtophyhost, payload:= (# sourcenetwork := sendfromlognet, sourcehost := sendfromloghost, destinationnetwork := sendtolognet, destinationhost := sendtologhost, label := processcategories #) #) #);
+                numsgsent' = numsgsent + 1;
+
+                sendfromphyhost' IN {v : topology!CLIENT | faulted OR v = me};
+                sendfromloghost' IN {v : topology!CLIENT | faulted OR v = me};
+                sendfromlognet' IN {v : topology!LOGICALNETWORKADDR | v /= topology!null AND (faulted OR v = mylognet)};
+                sendtophyhost' IN {a : topology!NODE | a /= topology!none AND a /= me};
+                sendtologhost' IN {a : topology!CLIENT | a /= me OR faulted};
+                sendtolognet' IN {a : LOGICALNETWORK | TRUE}
+
+        []
+	receive:
+        aether[cable].author /= topology!none AND
+        aether[cable].author /= me
+        -->
+                aether'[cable] = EMPTYMETAMESSAGE
+
+]
+
+END;
+
+trustedsystem [ me : HOST, cable : REALLINK, faulted : BOOLEAN, mylognet : topology!LOGICALNETWORKADDR, nummsgstosend : nznat ] : MODULE =
+BEGIN
+
+LOCAL processcategories : network!CLEARANCE
+LOCAL received : METAMESSAGE
+LOCAL numsgsent : [0..nummsgstosend]
+LOCAL sendfromphyhost : {v : topology!CLIENT | faulted OR v = me}
+LOCAL sendfromloghost : {v : topology!CLIENT | faulted OR v = me}
+LOCAL sendfromlognet : {v : topology!LOGICALNETWORKADDR | v /= topology!null AND (faulted OR v = mylognet)}
+LOCAL sendtophyhost : {a : topology!NODE | a /= topology!none AND a /= me}
+LOCAL sendtologhost : {a : topology!CLIENT | a /= me OR faulted}
+LOCAL sendtolognet : {a : LOGICALNETWORK | TRUE}
+GLOBAL aether : NETWORK
+
+INITIALIZATION
+numsgsent = 0;
+received = EMPTYMETAMESSAGE;
+
+TRANSITION
+[
+
+        send:
+	numsgsent < nummsgstosend AND aether[cable].author = topology!none
+	-->
+		aether'[cable] = (# author := me, forwarder := topology!none, payload := (# source := sendfromphyhost, destination := sendtophyhost, payload:= (# sourcenetwork := sendfromlognet, sourcehost := sendfromloghost, destinationnetwork := sendtolognet, destinationhost := sendtologhost, label := processcategories #) #) #);
+		numsgsent' = numsgsent + 1;
+		
+		sendfromphyhost' IN {v : topology!CLIENT | faulted OR v = me};
+		sendfromloghost' IN {v : topology!CLIENT | faulted OR v = me};
+		sendfromlognet' IN {v : topology!LOGICALNETWORKADDR | v /= topology!null AND (faulted OR v = mylognet)};
+		sendtophyhost' IN {a : topology!NODE | a /= topology!none AND a /= me};
+		sendtologhost' IN {a : topology!CLIENT | a /= me OR faulted};
+		sendtolognet' IN {a : LOGICALNETWORK | TRUE}
+	
+        []
+        receive:
+	aether[cable].author /= topology!none AND
+	aether[cable].author /= me AND
+	(FORALL (c : topology!CATEGORY) : (NOT(aether[cable].payload.payload.label[c]) OR processcategories[c]))
+        -->
+		received' = aether[cable];
+                aether'[cable] = EMPTYMETAMESSAGE
+
+]
+
+END;
+
+END
