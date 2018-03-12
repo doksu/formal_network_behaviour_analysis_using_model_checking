@@ -65,7 +65,7 @@ do
 			# depth used to determine which model checker for test
 			DEPTH=`echo $predicate_name | awk -F '_' '{print $3}'`
 
-			OUTPUT_FILE="../Data/$topology_name-$predicate_name-$GIT_COMMIT-$GIT_STATUS.output"
+			OUTPUT_FILE="./Data/$topology_name-$predicate_name-$GIT_COMMIT-$GIT_STATUS.output"
 			# remove an old output file if it exists
 			rm -f $OUTPUT_FILE
 
